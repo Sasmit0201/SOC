@@ -1,0 +1,58 @@
+# (Keep all imports and parameters from Task 1)
+import pygame, sys, numpy as np
+
+NUM_BOIDS = 150
+WIDTH, HEIGHT = 800, 600
+MAX_SPEED = 4.0
+PERCEPTION_RADIUS = 50.0
+
+# Obstacle definition
+OBS_POS = np.array([WIDTH//2, HEIGHT//2])
+OBS_RADIUS = 80
+OBS_REPULSION = 5.0
+
+class ObsSimulation:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.clock = pygame.time.Clock()
+        self.pos = np.random.rand(NUM_BOIDS, 2) * [WIDTH, HEIGHT]
+        self.vel = np.random.rand(NUM_BOIDS, 2) * 2 - 1
+
+    def update_boids(self):
+        # ... (Insert identical Separation, Alignment, Cohesion logic from Task 1 here) ...
+        
+        # --- NEW: OBSTACLE AVOIDANCE ---
+        obs_diff = self.pos - OBS_POS
+        obs_dist = np.linalg.norm(obs_diff, axis=1, keepdims=True)
+        
+        # Apply heavy repulsion if within perception of the obstacle
+        avoid_mask = obs_dist < (OBS_RADIUS + PERCEPTION_RADIUS)
+        avoid_force = np.where(avoid_mask, (obs_diff / (obs_dist + 1e-5)) * OBS_REPULSION, 0)
+        
+        self.vel += avoid_force
+        
+        speeds = np.linalg.norm(self.vel, axis=1, keepdims=True)
+        self.vel = np.where(speeds > MAX_SPEED, (self.vel / speeds) * MAX_SPEED, self.vel)
+        self.pos = self.pos % [WIDTH, HEIGHT]
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                    
+            self.update_boids()
+            self.screen.fill((30, 30, 30))
+            
+            # Draw Obstacle
+            pygame.draw.circle(self.screen, (200, 50, 50), OBS_POS.astype(int), OBS_RADIUS)
+            
+            # Draw Boids
+            for p in self.pos:
+                pygame.draw.circle(self.screen, (100, 200, 255), p.astype(int), 3)
+                
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    ObsSimulation().run()
