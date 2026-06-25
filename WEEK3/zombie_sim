@@ -1,0 +1,175 @@
+import pygame
+import sys
+import numpy as np
+
+WIDTH, HEIGHT = 800, 600
+START_CIVILIANS = 140
+START_ZOMBIES = 2
+
+CIV_MAX_SPEED = 2.5
+ZOM_MAX_SPEED = 2.6
+
+PERCEPTION_RADIUS = 50.0
+INFO_SPREAD_RADIUS = 40.0
+ZOMBIE_SIGHT = 100.0
+CATCH_RADIUS = 5.0
+
+class ZombieSimulator:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Mini Project: Zombie Evacuation Simulator")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont("monospace", 16, bold=True)
+        
+        self.c_pos = np.random.rand(START_CIVILIANS, 2) * [WIDTH, HEIGHT]
+        self.c_vel = np.random.rand(START_CIVILIANS, 2) * 2 - 1
+        self.informed = np.zeros(START_CIVILIANS, dtype=bool)
+        
+        self.z_pos = np.array([[10.0, 10.0], [WIDTH-10.0, HEIGHT-10.0]])
+        self.z_vel = np.random.rand(START_ZOMBIES, 2) * 2 - 1
+        
+        self.frames = 0
+        self.collapsed_time = None
+
+    def update(self):
+        if len(self.c_pos) == 0: return
+
+        self.frames += 1
+        num_civs, num_zoms = len(self.c_pos), len(self.z_pos)
+
+        c_c_diff = self.c_pos[:, np.newaxis, :] - self.c_pos[np.newaxis, :, :]
+        c_c_dist = np.linalg.norm(c_c_diff, axis=2)
+        np.fill_diagonal(c_c_dist, np.inf)
+
+        z_c_diff = self.c_pos[np.newaxis, :, :] - self.z_pos[:, np.newaxis, :]
+        z_c_dist = np.linalg.norm(z_c_diff, axis=2)
+
+        sees_zombie = np.any(z_c_dist < ZOMBIE_SIGHT, axis=0)
+        self.informed[sees_zombie] = True
+        
+        for i in range(num_civs):
+            if not self.informed[i]:
+                if (c_c_dist[i][self.informed] < INFO_SPREAD_RADIUS).any():
+                    self.informed[i] = True
+
+        mask = c_c_dist < PERCEPTION_RADIUS
+        sep_force = np.zeros((num_civs, 2))
+        align_force = np.zeros((num_civs, 2))
+        coh_force = np.zeros((num_civs, 2))
+        flee_force = np.zeros((num_civs, 2))
+
+        for i in range(num_civs):
+            neighbors = mask[i]
+            if any(neighbors):
+                sep_vector = np.sum(self.c_pos[i] - self.c_pos[neighbors], axis=0)
+                sep_force[i] = sep_vector / np.linalg.norm(sep_vector + 1e-5)
+                
+                avg_vel = np.mean(self.c_vel[neighbors], axis=0)
+                align_force[i] = avg_vel / np.linalg.norm(avg_vel + 1e-5)
+                
+                avg_pos = np.mean(self.c_pos[neighbors], axis=0)
+                coh_vector = avg_pos - self.c_pos[i]
+                coh_force[i] = coh_vector / np.linalg.norm(coh_vector + 1e-5)
+
+            if self.informed[i]:
+                closest_zom_idx = np.argmin(z_c_dist[:, i])
+                flee_vec = self.c_pos[i] - self.z_pos[closest_zom_idx]
+                flee_force[i] = flee_vec / np.linalg.norm(flee_vec + 1e-5)
+
+        self.c_vel += (sep_force * 1.5) + (align_force * 1.0) + (coh_force * 1.0) + (flee_force * 4.0)
+        c_speeds = np.linalg.norm(self.c_vel, axis=1, keepdims=True)
+        self.c_vel = np.where(c_speeds > CIV_MAX_SPEED, (self.c_vel / (c_speeds + 1e-5)) * CIV_MAX_SPEED, self.c_vel)
+        self.c_pos = (self.c_pos + self.c_vel) % [WIDTH, HEIGHT]
+
+        new_zombies, civilians_to_delete = [], []
+
+        for i in range(num_zoms):
+            closest_civ = np.argmin(z_c_dist[i])
+            chase_vec = self.c_pos[closest_civ] - self.z_pos[i]
+            self.z_vel[i] += (chase_vec / np.linalg.norm(chase_vec + 1e-5)) * 0.5
+            
+            if z_c_dist[i, closest_civ] < CATCH_RADIUS:
+                if closest_civ not in civilians_to_delete:
+                    civilians_to_delete.append(closest_civ)
+                    new_zombies.append(self.c_pos[closest_civ].copy())
+
+        z_speeds = np.linalg.norm(self.z_vel, axis=1, keepdims=True)
+        self.z_vel = np.where(z_speeds > ZOM_MAX_SPEED, (self.z_vel / (z_speeds + 1e-5)) * ZOM_MAX_SPEED, self.z_vel)
+        self.z_pos = (self.z_pos + self.z_vel) % [WIDTH, HEIGHT]
+
+        if new_zombies:
+            self.z_pos = np.vstack([self.z_pos, new_zombies])
+            self.z_vel = np.vstack([self.z_vel, np.zeros((len(new_zombies), 2))])
+            self.c_pos = np.delete(self.c_pos, civilians_to_delete, axis=0)
+            self.c_vel = np.delete(self.c_vel, civilians_to_delete, axis=0)
+            self.informed = np.delete(self.informed, civilians_to_delete)
+            
+        if len(self.c_pos) == 0 and self.collapsed_time is None:
+            self.collapsed_time = self.frames / 60.0
+
+    def calculate_groups(self):
+        if len(self.c_pos) == 0: return 0, 0
+        
+        c_c_diff = self.c_pos[:, np.newaxis, :] - self.c_pos[np.newaxis, :, :]
+        c_c_dist = np.linalg.norm(c_c_diff, axis=2)
+        adj_matrix = c_c_dist < PERCEPTION_RADIUS
+        
+        visited = np.zeros(len(self.c_pos), dtype=bool)
+        num_groups = 0
+        
+        for i in range(len(self.c_pos)):
+            if not visited[i]:
+                num_groups += 1
+                stack = [i]
+                while stack:
+                    curr = stack.pop()
+                    if not visited[curr]:
+                        visited[curr] = True
+                        for n in np.where(adj_matrix[curr])[0]:
+                            if not visited[n]: stack.append(n)
+                                
+        return num_groups, len(self.c_pos) / num_groups
+
+    def render_hud(self):
+        survivors = len(self.c_pos)
+        groups, avg_size = self.calculate_groups()
+        
+        hud_data = [
+            f"Survivors:      {survivors} ({(survivors / START_CIVILIANS) * 100:.1f}%)",
+            f"Groups Formed:  {groups}",
+            f"Avg Group Size: {avg_size:.1f}",
+            f"Time Elapsed:   {self.collapsed_time if self.collapsed_time else self.frames / 60.0:.1f}s"
+        ]
+        
+        if survivors == 0: hud_data.append("COLLAPSE COMPLETE")
+
+        overlay = pygame.Surface((280, 120))
+        overlay.set_alpha(180)
+        self.screen.blit(overlay, (10, 10))
+        
+        for i, text in enumerate(hud_data):
+            color = (255, 50, 50) if "COLLAPSE" in text else (255, 255, 255)
+            self.screen.blit(self.font.render(text, True, color), (20, 20 + (i * 20)))
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                    
+            self.update()
+            self.screen.fill((20, 25, 30))
+            
+            for i, p in enumerate(self.c_pos):
+                color = (255, 200, 50) if self.informed[i] else (100, 200, 255)
+                pygame.draw.circle(self.screen, color, p.astype(int), 4 if self.informed[i] else 3)
+
+            for p in self.z_pos:
+                pygame.draw.circle(self.screen, (255, 50, 50), p.astype(int), 5)
+                
+            self.render_hud()
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    ZombieSimulator().run()
