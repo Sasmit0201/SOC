@@ -1,0 +1,82 @@
+import pygame
+import numpy as np
+import sys
+
+NUM_BOIDS = 150
+WIDTH, HEIGHT = 800, 600
+MAX_SPEED = 4.0
+PERCEPTION_RADIUS = 50.0
+
+SEP_WEIGHT = 1.5
+ALIGN_WEIGHT = 1.0
+COHESION_WEIGHT = 1.0
+
+class Task1Simulation:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Task 1: Stable Boids Baseline")
+        self.clock = pygame.time.Clock()
+        
+        # Initialize random positions and velocities
+        self.pos = np.random.rand(NUM_BOIDS, 2) * [WIDTH, HEIGHT]
+        angles = np.random.rand(NUM_BOIDS) * 2 * np.pi
+        self.vel = np.column_stack((np.cos(angles), np.sin(angles))) * MAX_SPEED
+
+    def update_boids(self):
+        # Calculate distances
+        diff = self.pos[:, np.newaxis, :] - self.pos[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        np.fill_diagonal(dist, np.inf) 
+        
+        mask = dist < PERCEPTION_RADIUS
+        
+        sep_force = np.zeros((NUM_BOIDS, 2))
+        align_force = np.zeros((NUM_BOIDS, 2))
+        coh_force = np.zeros((NUM_BOIDS, 2))
+        
+        for i in range(NUM_BOIDS):
+            neighbors = mask[i]
+            if any(neighbors):
+                # Separation
+                sep_vector = np.sum(self.pos[i] - self.pos[neighbors], axis=0)
+                sep_force[i] = sep_vector / np.linalg.norm(sep_vector + 1e-5)
+                
+                # Alignment
+                avg_vel = np.mean(self.vel[neighbors], axis=0)
+                align_force[i] = avg_vel / np.linalg.norm(avg_vel + 1e-5)
+                
+                # Cohesion
+                avg_pos = np.mean(self.pos[neighbors], axis=0)
+                coh_vector = avg_pos - self.pos[i]
+                coh_force[i] = coh_vector / np.linalg.norm(coh_vector + 1e-5)
+                
+        # Apply weighted forces
+        self.vel += (sep_force * SEP_WEIGHT) + (align_force * ALIGN_WEIGHT) + (coh_force * COHESION_WEIGHT)
+        
+        # Clamp speed
+        speeds = np.linalg.norm(self.vel, axis=1, keepdims=True)
+        self.vel = np.where(speeds > MAX_SPEED, (self.vel / speeds) * MAX_SPEED, self.vel)
+        
+        # Update and wrap around edges
+        self.pos += self.vel
+        self.pos = self.pos % [WIDTH, HEIGHT]
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                    
+            self.update_boids()
+            
+            self.screen.fill((30, 30, 30))
+            for p in self.pos:
+                pygame.draw.circle(self.screen, (100, 200, 255), p.astype(int), 3)
+                
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    Task1Simulation().run()
