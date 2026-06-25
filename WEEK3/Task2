@@ -1,0 +1,96 @@
+import pygame
+import numpy as np
+import sys
+
+
+NUM_BOIDS = 150
+WIDTH, HEIGHT = 800, 600
+MAX_SPEED = 4.0
+
+# Variables to experiment with:
+PERCEPTION_RADIUS = 15.0  # Try 15.0 for fragmentation, 200.0 for rigid shapes
+SEP_WEIGHT = 0.1          # Try 0.1 for clumps, 5.0 for chaos
+ALIGN_WEIGHT = 3.0        # Try 3.0 for extreme synchronization
+COHESION_WEIGHT = 0.5
+
+class Task2Simulation:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Task 2: Parameter Exploration")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont("monospace", 16, bold=True)
+        
+        self.pos = np.random.rand(NUM_BOIDS, 2) * [WIDTH, HEIGHT]
+        angles = np.random.rand(NUM_BOIDS) * 2 * np.pi
+        self.vel = np.column_stack((np.cos(angles), np.sin(angles))) * MAX_SPEED
+
+    def update_boids(self):
+        diff = self.pos[:, np.newaxis, :] - self.pos[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        np.fill_diagonal(dist, np.inf)
+        
+        mask = dist < PERCEPTION_RADIUS
+        
+        sep_force = np.zeros((NUM_BOIDS, 2))
+        align_force = np.zeros((NUM_BOIDS, 2))
+        coh_force = np.zeros((NUM_BOIDS, 2))
+        
+        for i in range(NUM_BOIDS):
+            neighbors = mask[i]
+            if any(neighbors):
+                sep_vector = np.sum(self.pos[i] - self.pos[neighbors], axis=0)
+                sep_force[i] = sep_vector / np.linalg.norm(sep_vector + 1e-5)
+                
+                avg_vel = np.mean(self.vel[neighbors], axis=0)
+                align_force[i] = avg_vel / np.linalg.norm(avg_vel + 1e-5)
+                
+                avg_pos = np.mean(self.pos[neighbors], axis=0)
+                coh_vector = avg_pos - self.pos[i]
+                coh_force[i] = coh_vector / np.linalg.norm(coh_vector + 1e-5)
+                
+        self.vel += (sep_force * SEP_WEIGHT) + (align_force * ALIGN_WEIGHT) + (coh_force * COHESION_WEIGHT)
+        
+        speeds = np.linalg.norm(self.vel, axis=1, keepdims=True)
+        self.vel = np.where(speeds > MAX_SPEED, (self.vel / speeds) * MAX_SPEED, self.vel)
+        self.pos += self.vel
+        self.pos = self.pos % [WIDTH, HEIGHT]
+
+    def render_hud(self):
+        # Render text for easy screenshots
+        hud_data = [
+            f"Radius (Neighbor): {PERCEPTION_RADIUS}",
+            f"Separation:        {SEP_WEIGHT}",
+            f"Alignment:         {ALIGN_WEIGHT}",
+            f"Cohesion:          {COHESION_WEIGHT}"
+        ]
+        
+        # Draw a semi-transparent background for text readability
+        overlay = pygame.Surface((300, 100))
+        overlay.set_alpha(150)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (10, 10))
+        
+        for i, text in enumerate(hud_data):
+            surface = self.font.render(text, True, (255, 255, 255))
+            self.screen.blit(surface, (20, 20 + (i * 20)))
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                    
+            self.update_boids()
+            self.screen.fill((40, 45, 50))
+            
+            for p in self.pos:
+                pygame.draw.circle(self.screen, (255, 150, 100), p.astype(int), 4)
+                
+            self.render_hud()
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    Task2Simulation().run()
