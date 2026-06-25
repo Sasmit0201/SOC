@@ -1,0 +1,61 @@
+import pygame, sys, numpy as np
+
+WIDTH, HEIGHT = 800, 600
+NUM_PREY = 120
+NUM_PRED = 3
+
+class PredSimulation:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.clock = pygame.time.Clock()
+        
+        self.prey_pos = np.random.rand(NUM_PREY, 2) * [WIDTH, HEIGHT]
+        self.prey_vel = np.random.rand(NUM_PREY, 2) * 2 - 1
+        
+        self.pred_pos = np.random.rand(NUM_PRED, 2) * [WIDTH, HEIGHT]
+        self.pred_vel = np.random.rand(NUM_PRED, 2) * 2 - 1
+
+    def update(self):
+        # Prey Flocking (simplified for space)
+        self.prey_pos += self.prey_vel
+        self.prey_pos = self.prey_pos % [WIDTH, HEIGHT]
+        
+        # Predator Chasing: Find nearest prey
+        diff = self.prey_pos[np.newaxis, :, :] - self.pred_pos[:, np.newaxis, :]
+        dist = np.linalg.norm(diff, axis=2)
+        
+        for i in range(NUM_PRED):
+            closest_prey = np.argmin(dist[i])
+            chase_vec = self.prey_pos[closest_prey] - self.pred_pos[i]
+            self.pred_vel[i] += chase_vec * 0.05
+            
+        # Prey Fleeing: Run from close predators
+        for i in range(NUM_PREY):
+            close_preds = dist[:, i] < 100
+            if any(close_preds):
+                flee_vec = np.sum(self.prey_pos[i] - self.pred_pos[close_preds], axis=0)
+                self.prey_vel[i] += flee_vec * 0.2
+                
+        # Update Preds
+        pred_speeds = np.linalg.norm(self.pred_vel, axis=1, keepdims=True)
+        self.pred_vel = np.where(pred_speeds > 3.5, (self.pred_vel / pred_speeds) * 3.5, self.pred_vel)
+        self.pred_pos += self.pred_vel
+        self.pred_pos = self.pred_pos % [WIDTH, HEIGHT]
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                    
+            self.update()
+            self.screen.fill((30, 30, 30))
+            
+            for p in self.prey_pos: pygame.draw.circle(self.screen, (100, 255, 100), p.astype(int), 3)
+            for p in self.pred_pos: pygame.draw.circle(self.screen, (255, 50, 50), p.astype(int), 6)
+                
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    PredSimulation().run()
