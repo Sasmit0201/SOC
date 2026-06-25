@@ -1,50 +1,103 @@
-# (Keep all imports and parameters from Task 1)
-import pygame, sys, numpy as np
+Ah, that is completely my fault. Good catch.
 
+In my attempt to keep the code short by using a placeholder for the flocking logic, I accidentally deleted the single most important line of the physics engine: `self.pos += self.vel`. Without that line, the simulation calculates all the complex forces perfectly, but never actually applies them to move the boids forward.
+
+Here is the **complete, fully runnable Task 3 code**. No placeholders this time. It includes the standard flocking rules, the obstacle repulsion, and the necessary position updates so it actually moves.
+
+### Task 3: Obstacles (Fixed)
+
+```python
+import pygame
+import sys
+import numpy as np
+
+# --- PARAMETERS ---
 NUM_BOIDS = 150
 WIDTH, HEIGHT = 800, 600
 MAX_SPEED = 4.0
 PERCEPTION_RADIUS = 50.0
 
+SEP_WEIGHT = 1.5
+ALIGN_WEIGHT = 1.0
+COHESION_WEIGHT = 1.0
+
 # Obstacle definition
 OBS_POS = np.array([WIDTH//2, HEIGHT//2])
 OBS_RADIUS = 80
-OBS_REPULSION = 5.0
+OBS_REPULSION = 10.0 # Cranked up slightly so they visibly split around it
 
 class ObsSimulation:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Task 3: Obstacle Avoidance")
         self.clock = pygame.time.Clock()
+        
+        # Initialize positions and velocities
         self.pos = np.random.rand(NUM_BOIDS, 2) * [WIDTH, HEIGHT]
-        self.vel = np.random.rand(NUM_BOIDS, 2) * 2 - 1
+        angles = np.random.rand(NUM_BOIDS) * 2 * np.pi
+        self.vel = np.column_stack((np.cos(angles), np.sin(angles))) * MAX_SPEED
 
     def update_boids(self):
-        # ... (Insert identical Separation, Alignment, Cohesion logic from Task 1 here) ...
+        # 1. Standard Flocking (Separation, Alignment, Cohesion)
+        diff = self.pos[:, np.newaxis, :] - self.pos[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        np.fill_diagonal(dist, np.inf)
         
-        # --- NEW: OBSTACLE AVOIDANCE ---
+        mask = dist < PERCEPTION_RADIUS
+        
+        sep_force = np.zeros((NUM_BOIDS, 2))
+        align_force = np.zeros((NUM_BOIDS, 2))
+        coh_force = np.zeros((NUM_BOIDS, 2))
+        
+        for i in range(NUM_BOIDS):
+            neighbors = mask[i]
+            if any(neighbors):
+                sep_vector = np.sum(self.pos[i] - self.pos[neighbors], axis=0)
+                sep_force[i] = sep_vector / np.linalg.norm(sep_vector + 1e-5)
+                
+                avg_vel = np.mean(self.vel[neighbors], axis=0)
+                align_force[i] = avg_vel / np.linalg.norm(avg_vel + 1e-5)
+                
+                avg_pos = np.mean(self.pos[neighbors], axis=0)
+                coh_vector = avg_pos - self.pos[i]
+                coh_force[i] = coh_vector / np.linalg.norm(coh_vector + 1e-5)
+
+        # 2. NEW: Obstacle Avoidance
         obs_diff = self.pos - OBS_POS
         obs_dist = np.linalg.norm(obs_diff, axis=1, keepdims=True)
         
         # Apply heavy repulsion if within perception of the obstacle
         avoid_mask = obs_dist < (OBS_RADIUS + PERCEPTION_RADIUS)
         avoid_force = np.where(avoid_mask, (obs_diff / (obs_dist + 1e-5)) * OBS_REPULSION, 0)
+
+        # 3. Apply all forces together
+        self.vel += (sep_force * SEP_WEIGHT) + \
+                    (align_force * ALIGN_WEIGHT) + \
+                    (coh_force * COHESION_WEIGHT) + \
+                    avoid_force
         
-        self.vel += avoid_force
-        
+        # 4. Clamp speed
         speeds = np.linalg.norm(self.vel, axis=1, keepdims=True)
         self.vel = np.where(speeds > MAX_SPEED, (self.vel / speeds) * MAX_SPEED, self.vel)
+        
+        # 5. Update Position (The missing line!)
+        self.pos += self.vel
+        
+        # 6. Wrap around edges
         self.pos = self.pos % [WIDTH, HEIGHT]
 
     def run(self):
         while True:
             for event in pygame.event.get():
-                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
                     
             self.update_boids()
             self.screen.fill((30, 30, 30))
             
-            # Draw Obstacle
+            # Draw Obstacle (Red Circle in the middle)
             pygame.draw.circle(self.screen, (200, 50, 50), OBS_POS.astype(int), OBS_RADIUS)
             
             # Draw Boids
@@ -56,3 +109,5 @@ class ObsSimulation:
 
 if __name__ == "__main__":
     ObsSimulation().run()
+
+```
