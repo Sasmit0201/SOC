@@ -1,0 +1,52 @@
+import pygame, sys, numpy as np
+
+NUM_BOIDS = 150
+WIDTH, HEIGHT = 800, 600
+
+class InfoSimulation:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.clock = pygame.time.Clock()
+        
+        self.pos = np.random.rand(NUM_BOIDS, 2) * [WIDTH, HEIGHT]
+        self.vel = np.random.rand(NUM_BOIDS, 2) * 2 - 1
+        
+        # Track who is informed (0 = uninformed, 1 = informed)
+        self.informed = np.zeros(NUM_BOIDS, dtype=bool)
+        self.informed[0] = True # Mark the first agent as informed
+
+    def update(self):
+        self.pos += self.vel * 2
+        self.pos = self.pos % [WIDTH, HEIGHT]
+        
+        # Information passing logic
+        diff = self.pos[:, np.newaxis, :] - self.pos[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        
+        # Anyone within 40 pixels of an informed agent becomes informed
+        for i in range(NUM_BOIDS):
+            if not self.informed[i]:
+                # Check distance to all currently informed agents
+                close_to_informed = (dist[i][self.informed] < 40).any()
+                if close_to_informed:
+                    self.informed[i] = True
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                    
+            self.update()
+            self.screen.fill((30, 30, 30))
+            
+            for i, p in enumerate(self.pos):
+                # Color code based on state
+                color = (255, 200, 50) if self.informed[i] else (100, 200, 255)
+                pygame.draw.circle(self.screen, color, p.astype(int), 4)
+                
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    InfoSimulation().run()
