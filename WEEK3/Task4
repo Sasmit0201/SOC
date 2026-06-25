@@ -1,15 +1,22 @@
-import pygame, sys, numpy as np
+import pygame
+import sys
+import numpy as np
 
 WIDTH, HEIGHT = 800, 600
 NUM_PREY = 120
 NUM_PRED = 3
 
+MAX_PREY_SPEED = 2.0  # Cap the speed so prey don't accelerate infinitely
+MAX_PRED_SPEED = 2.2  # Keep predators slightly faster so a chase happens
+
 class PredSimulation:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Task 4: Predator and Prey")
         self.clock = pygame.time.Clock()
         
+        # Initialize positions and velocities
         self.prey_pos = np.random.rand(NUM_PREY, 2) * [WIDTH, HEIGHT]
         self.prey_vel = np.random.rand(NUM_PREY, 2) * 2 - 1
         
@@ -17,42 +24,52 @@ class PredSimulation:
         self.pred_vel = np.random.rand(NUM_PRED, 2) * 2 - 1
 
     def update(self):
-        # Prey Flocking (simplified for space)
-        self.prey_pos += self.prey_vel
-        self.prey_pos = self.prey_pos % [WIDTH, HEIGHT]
-        
-        # Predator Chasing: Find nearest prey
+        # 1. Predator Chasing: Find nearest prey
         diff = self.prey_pos[np.newaxis, :, :] - self.pred_pos[:, np.newaxis, :]
         dist = np.linalg.norm(diff, axis=2)
         
         for i in range(NUM_PRED):
             closest_prey = np.argmin(dist[i])
             chase_vec = self.prey_pos[closest_prey] - self.pred_pos[i]
-            self.pred_vel[i] += chase_vec * 0.05
+            # Add a small acceleration towards the target
+            self.pred_vel[i] += chase_vec * 0.02 
             
-        # Prey Fleeing: Run from close predators
+        # 2. Prey Fleeing: Run from close predators
         for i in range(NUM_PREY):
             close_preds = dist[:, i] < 100
             if any(close_preds):
                 flee_vec = np.sum(self.prey_pos[i] - self.pred_pos[close_preds], axis=0)
-                self.prey_vel[i] += flee_vec * 0.2
+                self.prey_vel[i] += flee_vec * 0.1
                 
-        # Update Preds
+        # 3. Clamp Prey Speed and Update
+        prey_speeds = np.linalg.norm(self.prey_vel, axis=1, keepdims=True)
+        self.prey_vel = np.where(prey_speeds > MAX_PREY_SPEED, (self.prey_vel / (prey_speeds + 1e-5)) * MAX_PREY_SPEED, self.prey_vel)
+        self.prey_pos += self.prey_vel
+        self.prey_pos = self.prey_pos % [WIDTH, HEIGHT]
+
+        # 4. Clamp Predator Speed and Update
         pred_speeds = np.linalg.norm(self.pred_vel, axis=1, keepdims=True)
-        self.pred_vel = np.where(pred_speeds > 3.5, (self.pred_vel / pred_speeds) * 3.5, self.pred_vel)
+        self.pred_vel = np.where(pred_speeds > MAX_PRED_SPEED, (self.pred_vel / (pred_speeds + 1e-5)) * MAX_PRED_SPEED, self.pred_vel)
         self.pred_pos += self.pred_vel
         self.pred_pos = self.pred_pos % [WIDTH, HEIGHT]
 
     def run(self):
         while True:
             for event in pygame.event.get():
-                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
                     
             self.update()
             self.screen.fill((30, 30, 30))
             
-            for p in self.prey_pos: pygame.draw.circle(self.screen, (100, 255, 100), p.astype(int), 3)
-            for p in self.pred_pos: pygame.draw.circle(self.screen, (255, 50, 50), p.astype(int), 6)
+            # Draw Prey (Green)
+            for p in self.prey_pos: 
+                pygame.draw.circle(self.screen, (100, 255, 100), p.astype(int), 3)
+            
+            # Draw Predators (Red)
+            for p in self.pred_pos: 
+                pygame.draw.circle(self.screen, (255, 50, 50), p.astype(int), 6)
                 
             pygame.display.flip()
             self.clock.tick(60)
