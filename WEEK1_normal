@@ -1,0 +1,38 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+N = 75
+ON = 255
+OFF = 0
+
+grid = np.random.choice([ON, OFF], N*N, p=[0.08, 0.92]).reshape(N, N)
+
+def update(frameNum, img, grid, N):
+    neighbors = (
+        np.roll(grid, 1, 0) + np.roll(grid, -1, 0) +
+        np.roll(grid, 1, 1) + np.roll(grid, -1, 1) +
+        np.roll(np.roll(grid, 1, 0), 1, 1) +
+        np.roll(np.roll(grid, -1, 0), -1, 1) +
+        np.roll(np.roll(grid, 1, 0), -1, 1) +
+        np.roll(np.roll(grid, -1, 0), 1, 1)
+    ) // 255
+
+    newGrid = np.copy(grid)
+    
+    newGrid[((grid == ON) & ((neighbors < 2) | (neighbors > 3)))] = OFF
+    newGrid[((grid == OFF) & (neighbors == 3))] = ON
+
+    img.set_data(newGrid)
+    grid[:] = newGrid[:]
+    return img,
+
+fig, ax = plt.subplots()
+ax.axis('off')
+
+img = ax.imshow(grid, interpolation='nearest', cmap='binary')
+
+ani = animation.FuncAnimation(fig, update, fargs=(img, grid, N),
+                              frames=300, interval=100, save_count=50)
+
+plt.show()
