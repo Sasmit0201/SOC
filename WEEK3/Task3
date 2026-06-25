@@ -1,17 +1,7 @@
-Ah, that is completely my fault. Good catch.
-
-In my attempt to keep the code short by using a placeholder for the flocking logic, I accidentally deleted the single most important line of the physics engine: `self.pos += self.vel`. Without that line, the simulation calculates all the complex forces perfectly, but never actually applies them to move the boids forward.
-
-Here is the **complete, fully runnable Task 3 code**. No placeholders this time. It includes the standard flocking rules, the obstacle repulsion, and the necessary position updates so it actually moves.
-
-### Task 3: Obstacles (Fixed)
-
-```python
 import pygame
 import sys
 import numpy as np
 
-# --- PARAMETERS ---
 NUM_BOIDS = 150
 WIDTH, HEIGHT = 800, 600
 MAX_SPEED = 4.0
