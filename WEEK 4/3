@@ -1,0 +1,167 @@
+import pygame
+import sys
+import numpy as np
+import torch
+import torch.nn as nn
+
+WIDTH, HEIGHT = 800, 600
+START_CIVILIANS = 140
+START_ZOMBIES = 2
+
+CIV_MAX_SPEED = 2.5
+ZOM_MAX_SPEED = 2.6
+
+PERCEPTION_RADIUS = 50.0
+INFO_SPREAD_RADIUS = 40.0
+ZOMBIE_SIGHT = 100.0
+CATCH_RADIUS = 5.0
+
+# --- THE LEARNABLE POLICY NETWORK ---
+class FleeNetwork(nn.Module):
+    """
+    Replaces the hardcoded escape rule.
+    Input (4): [dx to nearest zombie, dy to nearest zombie, current vel_x, current vel_y]
+    Output (2): [proposed force_x, proposed force_y]
+    """
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(4, 16),
+            nn.ReLU(),
+            nn.Linear(16, 2),
+            nn.Tanh() 
+        )
+        
+        # Hardcoding initial weights to simulate a "learned" optimal policy 
+        # for immediate inference and visualization.
+        with torch.no_grad():
+            self.net[0].weight.zero_()
+            self.net[0].bias.zero_()
+            self.net[2].weight.zero_()
+            self.net[2].bias.zero_()
+            self.net[0].weight[0, 0] = -1.0 
+            self.net[0].weight[1, 1] = -1.0
+            self.net[2].weight[0, 0] = 1.0
+            self.net[2].weight[1, 1] = 1.0
+
+    def forward(self, x):
+        return self.net(x)
+
+class MLZombieSimulator:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Week 4: Neural Network Agent Evacuation")
+        self.clock = pygame.time.Clock()
+        
+        self.c_pos = np.random.rand(START_CIVILIANS, 2) * [WIDTH, HEIGHT]
+        self.c_vel = np.random.rand(START_CIVILIANS, 2) * 2 - 1
+        self.informed = np.zeros(START_CIVILIANS, dtype=bool)
+        
+        self.z_pos = np.array([[10.0, 10.0], [WIDTH-10.0, HEIGHT-10.0]])
+        self.z_vel = np.random.rand(START_ZOMBIES, 2) * 2 - 1
+        
+        self.brain = FleeNetwork()
+        self.brain.eval() 
+
+    def update(self):
+        if len(self.c_pos) == 0: return
+
+        num_civs, num_zoms = len(self.c_pos), len(self.z_pos)
+        c_c_diff = self.c_pos[:, np.newaxis, :] - self.c_pos[np.newaxis, :, :]
+        c_c_dist = np.linalg.norm(c_c_diff, axis=2)
+        np.fill_diagonal(c_c_dist, np.inf)
+
+        z_c_diff = self.c_pos[np.newaxis, :, :] - self.z_pos[:, np.newaxis, :]
+        z_c_dist = np.linalg.norm(z_c_diff, axis=2)
+
+        sees_zombie = np.any(z_c_dist < ZOMBIE_SIGHT, axis=0)
+        self.informed[sees_zombie] = True
+        
+        for i in range(num_civs):
+            if not self.informed[i]:
+                if (c_c_dist[i][self.informed] < INFO_SPREAD_RADIUS).any():
+                    self.informed[i] = True
+
+        mask = c_c_dist < PERCEPTION_RADIUS
+        sep_force = np.zeros((num_civs, 2))
+        align_force = np.zeros((num_civs, 2))
+        coh_force = np.zeros((num_civs, 2))
+        flee_force = np.zeros((num_civs, 2))
+        
+        for i in range(num_civs):
+            neighbors = mask[i]
+            if any(neighbors):
+                sep_vector = np.sum(self.c_pos[i] - self.c_pos[neighbors], axis=0)
+                sep_force[i] = sep_vector / np.linalg.norm(sep_vector + 1e-5)
+                
+                avg_vel = np.mean(self.c_vel[neighbors], axis=0)
+                align_force[i] = avg_vel / np.linalg.norm(avg_vel + 1e-5)
+                
+                avg_pos = np.mean(self.c_pos[neighbors], axis=0)
+                coh_vector = avg_pos - self.c_pos[i]
+                coh_force[i] = coh_vector / np.linalg.norm(coh_vector + 1e-5)
+
+            # --- NEURAL NETWORK INFERENCE ---
+            if self.informed[i]:
+                closest_zom_idx = np.argmin(z_c_dist[:, i])
+                z_vec = self.z_pos[closest_zom_idx] - self.c_pos[i]
+                
+                obs = torch.tensor([
+                    z_vec[0], z_vec[1], 
+                    self.c_vel[i][0], self.c_vel[i][1]
+                ], dtype=torch.float32)
+                
+                with torch.no_grad():
+                    action = self.brain(obs).numpy()
+                
+                flee_force[i] = action
+
+        self.c_vel += (sep_force * 1.5) + (align_force * 1.0) + (coh_force * 1.0) + (flee_force * 4.0)
+        c_speeds = np.linalg.norm(self.c_vel, axis=1, keepdims=True)
+        self.c_vel = np.where(c_speeds > CIV_MAX_SPEED, (self.c_vel / (c_speeds + 1e-5)) * CIV_MAX_SPEED, self.c_vel)
+        self.c_pos = (self.c_pos + self.c_vel) % [WIDTH, HEIGHT]
+
+        new_zombies, civilians_to_delete = [], []
+
+        for i in range(num_zoms):
+            closest_civ = np.argmin(z_c_dist[i])
+            chase_vec = self.c_pos[closest_civ] - self.z_pos[i]
+            self.z_vel[i] += (chase_vec / np.linalg.norm(chase_vec + 1e-5)) * 0.5
+            
+            if z_c_dist[i, closest_civ] < CATCH_RADIUS:
+                if closest_civ not in civilians_to_delete:
+                    civilians_to_delete.append(closest_civ)
+                    new_zombies.append(self.c_pos[closest_civ].copy())
+
+        z_speeds = np.linalg.norm(self.z_vel, axis=1, keepdims=True)
+        self.z_vel = np.where(z_speeds > ZOM_MAX_SPEED, (self.z_vel / (z_speeds + 1e-5)) * ZOM_MAX_SPEED, self.z_vel)
+        self.z_pos = (self.z_pos + self.z_vel) % [WIDTH, HEIGHT]
+
+        if new_zombies:
+            self.z_pos = np.vstack([self.z_pos, new_zombies])
+            self.z_vel = np.vstack([self.z_vel, np.zeros((len(new_zombies), 2))])
+            self.c_pos = np.delete(self.c_pos, civilians_to_delete, axis=0)
+            self.c_vel = np.delete(self.c_vel, civilians_to_delete, axis=0)
+            self.informed = np.delete(self.informed, civilians_to_delete)
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
+                    
+            self.update()
+            self.screen.fill((20, 25, 30))
+            
+            for i, p in enumerate(self.c_pos):
+                color = (255, 200, 50) if self.informed[i] else (100, 200, 255)
+                pygame.draw.circle(self.screen, color, p.astype(int), 4 if self.informed[i] else 3)
+
+            for p in self.z_pos:
+                pygame.draw.circle(self.screen, (255, 50, 50), p.astype(int), 5)
+                
+            pygame.display.flip()
+            self.clock.tick(60)
+
+if __name__ == "__main__":
+    MLZombieSimulator().run()
