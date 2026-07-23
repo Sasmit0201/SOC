@@ -1,0 +1,3 @@
+numpy>=1.24
+matplotlib>=3.7
+# Pillow (ships with matplotlib) writes the replay gifs.
